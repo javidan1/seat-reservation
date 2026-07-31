@@ -24,6 +24,9 @@ const seats = new Map(); // seatId -> {id,rowLabel,seatNumber,status,holdExpires
 const selection = new Set();
 let myHold = null; // {id, seatIds, remainingSeconds}
 let countdownTimer = null;
+let myWait = null; // {id, seatId}
+let waitPollTimer = null;
+let pendingWaitSeat = null;
 
 $("user-ref").textContent = userRef;
 
@@ -109,7 +112,10 @@ function renderAll() {
     } else if (seat.status === "SOLD") {
       el.classList.add("sold");
     }
-    el.disabled = seat.status !== "AVAILABLE" && !el.classList.contains("mine");
+    if (myWait && myWait.seatId === seat.id) {
+      el.classList.add("waited");
+    }
+    el.disabled = seat.status === "SOLD"; // held seats stay clickable: they open the waitlist
   }
   // Drop selected seats someone else grabbed.
   for (const id of [...selection]) {
@@ -156,7 +162,15 @@ function labelsOf(ids) {
 function toggleSeat(id) {
   if (myHold) return;
   const seat = seats.get(id);
-  if (!seat || seat.status !== "AVAILABLE") return;
+  if (!seat) return;
+  if (seat.status === "HELD") {
+    if (myWait) return; // one queue at a time
+    pendingWaitSeat = id;
+    $("join-seat-label").textContent = labelsOf([id]);
+    showPanel("join");
+    return;
+  }
+  if (seat.status !== "AVAILABLE") return;
   if (selection.has(id)) selection.delete(id);
   else if (selection.size < 8) selection.add(id);
   renderAll();
@@ -174,6 +188,8 @@ function showPanel(which) {
   $("selection-box").hidden = which !== "select";
   $("hold-box").hidden = which !== "hold";
   $("booking-box").hidden = which !== "booked";
+  $("join-box").hidden = which !== "join";
+  $("waitlist-box").hidden = which !== "wait";
 }
 
 function startCountdown() {
@@ -197,6 +213,89 @@ function endHold() {
   showPanel("select");
   renderAll();
 }
+
+// --- Waitlist flow ---
+
+function adoptHold(hold, message) {
+  myHold = {
+    id: hold.id,
+    seatIds: hold.seatIds,
+    remainingSeconds: hold.remainingSeconds,
+  };
+  $("hold-seats").textContent = labelsOf(myHold.seatIds);
+  $("countdown").textContent = myHold.remainingSeconds;
+  showPanel("hold");
+  startCountdown();
+  if (message) toast(message);
+  renderAll();
+}
+
+function endWait() {
+  myWait = null;
+  clearInterval(waitPollTimer);
+  showPanel("select");
+  renderAll();
+}
+
+async function pollWait() {
+  if (!myWait) return;
+  const res = await api("GET", `/api/waitlist/${myWait.id}`);
+  if (res.status !== 200) return;
+  const entry = res.body;
+  if (entry.status === "WAITING") {
+    $("wait-position").textContent = entry.position;
+  } else if (entry.status === "GRANTED") {
+    clearInterval(waitPollTimer);
+    const hold = await api("GET", `/api/holds/${entry.grantedHoldId}`);
+    myWait = null;
+    if (hold.status === 200 && hold.body.status === "ACTIVE") {
+      adoptHold(hold.body, `${entry.seatLabel} is yours — confirm before the countdown ends!`);
+    } else {
+      toast("Your turn came and went while you were away.");
+      endWait();
+    }
+    await refreshSnapshot();
+  } else {
+    toast(`The wait for ${entry.seatLabel} is over — the seat was sold.`);
+    endWait();
+  }
+}
+
+$("join-btn").addEventListener("click", async () => {
+  const res = await api("POST", `/api/events/${eventId}/waitlist`, {
+    userRef,
+    seatId: pendingWaitSeat,
+  });
+  if (res.status === 201) {
+    myWait = { id: res.body.id, seatId: res.body.seatId };
+    $("wait-seat-label").textContent = res.body.seatLabel;
+    $("wait-position").textContent = res.body.position;
+    showPanel("wait");
+    clearInterval(waitPollTimer);
+    waitPollTimer = setInterval(pollWait, 2000);
+    renderAll();
+  } else {
+    toast(res.body?.message || "Could not join the waitlist.");
+    showPanel("select");
+    await refreshSnapshot();
+  }
+  pendingWaitSeat = null;
+});
+
+$("join-cancel-btn").addEventListener("click", () => {
+  pendingWaitSeat = null;
+  showPanel("select");
+});
+
+$("wait-cancel-btn").addEventListener("click", async () => {
+  const res = await api("DELETE", `/api/waitlist/${myWait.id}`);
+  if (res.status === 409) {
+    // Already granted — the next poll adopts the hold.
+    await pollWait();
+    return;
+  }
+  endWait();
+});
 
 $("hold-btn").addEventListener("click", async () => {
   const res = await api("POST", `/api/events/${eventId}/holds`, {

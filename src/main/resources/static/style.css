@@ -77,7 +77,8 @@ header h1 { margin: 0 0 4px; font-size: 1.4rem; }
 .seat:hover:not(:disabled) { transform: scale(1.15); border-color: var(--selected); }
 .seat.selected { background: var(--selected); border-color: var(--selected); }
 .seat.mine { background: var(--mine); border-color: var(--mine); }
-.seat.held { background: var(--held); border-color: #d97706; cursor: not-allowed; }
+.seat.held { background: var(--held); border-color: #d97706; } /* clickable: joins waitlist */
+.seat.waited { outline: 2px solid var(--selected); outline-offset: 1px; }
 .seat.sold { background: var(--sold); border-color: var(--sold); cursor: not-allowed; }
 
 .legend {

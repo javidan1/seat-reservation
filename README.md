@@ -39,6 +39,7 @@ The tests that carry the correctness claims:
 | `RestartDurabilityIT` | Full context teardown + reboot against the same DB: bookings survive, in-flight holds still confirm |
 | `PartialConfirmGuardIT` | A hold that lost one seat never sells a subset |
 | `MultiInstanceStressIT` | Two app processes, one Postgres: the storm invariants still hold |
+| `WaitlistIT` | FIFO grants in strict arrival order (concurrent-join storm), waiters outrank direct claims even on lapsed holds, sold seats leave no zombie queues |
 | `ArchitectureTest` | The layer rules in CLAUDE.md, enforced by ArchUnit |
 
 ## API
@@ -50,6 +51,8 @@ The tests that carry the correctness claims:
 | `GET /api/holds/{id}` · `DELETE /api/holds/{id}` | inspect (DB-clock `remainingSeconds`) / release (idempotent 204) |
 | `POST /api/holds/{id}/confirm` | 201 booking · 200 same booking on retry · 410 if lapsed |
 | `GET /api/bookings/{id}` | booking with its seats |
+| `POST /api/events/{id}/waitlist` `{userRef, seatId}` | queue for a HELD seat → 201 with live position |
+| `GET /api/waitlist/{id}` · `DELETE /api/waitlist/{id}` | poll status/position/granted hold · leave the queue |
 | `GET /api/events/{id}/stream` | SSE: versioned committed seat changes |
 
 ## Cloud deployment (bonus)

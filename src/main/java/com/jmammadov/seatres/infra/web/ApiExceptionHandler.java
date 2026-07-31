@@ -3,7 +3,9 @@ package com.jmammadov.seatres.infra.web;
 import com.jmammadov.seatres.application.AvailabilityService;
 import com.jmammadov.seatres.domain.EventNotFoundException;
 import com.jmammadov.seatres.domain.HoldInvalidatedException;
+import com.jmammadov.seatres.domain.SeatNotFoundException;
 import com.jmammadov.seatres.domain.SeatsUnavailableException;
+import com.jmammadov.seatres.domain.WaitlistJoinRejectedException;
 import com.jmammadov.seatres.infra.web.dto.ApiError;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,6 +45,18 @@ public class ApiExceptionHandler {
   @ResponseStatus(HttpStatus.NOT_FOUND)
   public ApiError eventNotFound(EventNotFoundException e) {
     return ApiError.of("event_not_found", e.getMessage());
+  }
+
+  @ExceptionHandler(SeatNotFoundException.class)
+  @ResponseStatus(HttpStatus.NOT_FOUND)
+  public ApiError seatNotFound(SeatNotFoundException e) {
+    return ApiError.of("seat_not_found", e.getMessage());
+  }
+
+  @ExceptionHandler(WaitlistJoinRejectedException.class)
+  @ResponseStatus(HttpStatus.CONFLICT)
+  public ApiError waitlistJoinRejected(WaitlistJoinRejectedException e) {
+    return ApiError.of("waitlist_join_rejected", e.getMessage());
   }
 
   @ExceptionHandler(IllegalArgumentException.class)

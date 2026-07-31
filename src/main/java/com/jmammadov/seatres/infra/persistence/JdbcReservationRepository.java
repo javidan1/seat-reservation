@@ -8,6 +8,8 @@ import com.jmammadov.seatres.domain.HoldView;
 import com.jmammadov.seatres.domain.SeatChange;
 import com.jmammadov.seatres.domain.SeatStatus;
 import com.jmammadov.seatres.domain.SeatView;
+import com.jmammadov.seatres.domain.WaitlistStatus;
+import com.jmammadov.seatres.domain.WaitlistView;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -27,7 +29,8 @@ import org.springframework.stereotype.Repository;
  *   <li>state changes are conditional UPDATEs — the WHERE clause decides the race, atomically;
  *   <li>the database's {@code now()} is the only clock — it is transaction-stable, so a claim's
  *       hold row and seat rows always get the identical expiry timestamp;
- *   <li>expired holds are claimable by anyone: the sweeper is a janitor, not a dependency.
+ *   <li>expired holds are claimable by anyone — unless someone is waiting: the waitlist has first
+ *       claim, and the seat row itself serializes freeing, joining, and claiming.
  * </ol>
  *
  * Runs at READ COMMITTED (deliberate): after a row-lock wait, Postgres re-evaluates the WHERE
@@ -39,9 +42,9 @@ public class JdbcReservationRepository implements ReservationRepository {
   private static final String SEAT_RETURNING =
       " RETURNING event_id, id, row_label, seat_number, status, hold_expires_at, version";
 
-  /** Effective availability: a lapsed hold's seat is claimable without waiting for the sweeper. */
-  private static final String CLAIMABLE =
-      "(status = 'AVAILABLE' OR (status = 'HELD' AND hold_expires_at <= now()))";
+  /** No live waiters: the waitlist outranks any direct claim, including lazy reclaims. */
+  private static final String NO_LIVE_WAITERS_FOR = // parameter: seat id column reference
+      "NOT EXISTS (SELECT 1 FROM waitlist w WHERE w.seat_id = %s AND w.status = 'WAITING')";
 
   /** Inner SELECT locks in sorted id order so concurrent overlapping claims cannot deadlock. */
   private static final String CLAIM_SEATS =
@@ -55,6 +58,10 @@ public class JdbcReservationRepository implements ReservationRepository {
                      WHERE s.id IN (:seatIds) AND s.event_id = :eventId
                        AND (s.status = 'AVAILABLE'
                             OR (s.status = 'HELD' AND s.hold_expires_at <= now()))
+                       AND
+      """
+          + NO_LIVE_WAITERS_FOR.formatted("s.id")
+          + """
                      ORDER BY s.id
                        FOR UPDATE)
       """
@@ -84,14 +91,6 @@ public class JdbcReservationRepository implements ReservationRepository {
       """
           + SEAT_RETURNING;
 
-  private static final String RELEASE_SEATS =
-      """
-      UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, hold_expires_at = NULL,
-                      version = version + 1
-       WHERE hold_id IN (:holdIds) AND status = 'HELD'
-      """
-          + SEAT_RETURNING;
-
   private static final String INSERT_BOOKING =
       """
       INSERT INTO booking (id, hold_id, event_id, user_ref)
@@ -116,6 +115,81 @@ public class JdbcReservationRepository implements ReservationRepository {
       RETURNING h.id
       """;
 
+  // --- Seat routing: the seat row is the serialization point ---
+
+  private static final String SEAT_IDS_OF_HOLD =
+      "SELECT id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY id";
+
+  private static final String LOCK_FREED_SEAT =
+      """
+      SELECT 1 FROM seat
+       WHERE id = :seatId AND hold_id = :oldHoldId AND status = 'HELD'
+         FOR UPDATE
+      """;
+
+  private static final String POOL_SEAT =
+      """
+      UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, hold_expires_at = NULL,
+                      version = version + 1
+       WHERE id = :seatId
+      """
+          + SEAT_RETURNING;
+
+  private static final String ASSIGN_SEAT_TO_HOLD =
+      """
+      UPDATE seat SET hold_id = :holdId,
+             hold_expires_at = now() + make_interval(secs => :ttl),
+             version = version + 1
+       WHERE id = :seatId
+      """
+          + SEAT_RETURNING;
+
+  // --- Waitlist ---
+
+  private static final String LOCK_SEAT_FOR_JOIN =
+      "SELECT status, event_id FROM seat WHERE id = :seatId FOR SHARE";
+
+  private static final String INSERT_WAITLIST =
+      """
+      INSERT INTO waitlist (id, seat_id, event_id, user_ref, status)
+      VALUES (:id, :seatId, :eventId, :userRef, 'WAITING')
+      """;
+
+  private static final String FIND_WAITLIST_ENTRY =
+      """
+      SELECT w.id, w.seat_id, w.event_id, w.user_ref, w.status, w.granted_hold_id,
+             s.row_label, s.seat_number,
+             CASE WHEN w.status = 'WAITING'
+                  THEN (SELECT count(*) + 1 FROM waitlist w2
+                         WHERE w2.seat_id = w.seat_id AND w2.status = 'WAITING'
+                           AND w2.position < w.position)
+                  ELSE 0 END AS live_position
+        FROM waitlist w
+        JOIN seat s ON s.id = w.seat_id
+       WHERE w.id = :entryId
+      """;
+
+  /** Plain read on purpose: no lock (cancel CAS absorbs races), no SKIP LOCKED (fairness). */
+  private static final String HEAD_WAITER =
+      """
+      SELECT id, event_id, user_ref FROM waitlist
+       WHERE seat_id = :seatId AND status = 'WAITING'
+       ORDER BY position
+       LIMIT 1
+      """;
+
+  private static final String CAS_GRANT_WAITLIST =
+      """
+      UPDATE waitlist SET status = 'GRANTED', granted_hold_id = :holdId
+       WHERE id = :entryId AND status = 'WAITING'
+      """;
+
+  private static final String CAS_CANCEL_WAITLIST =
+      "UPDATE waitlist SET status = 'CANCELLED' WHERE id = :entryId AND status = 'WAITING'";
+
+  private static final String CANCEL_WAITING_ON_SEATS =
+      "UPDATE waitlist SET status = 'CANCELLED' WHERE seat_id IN (:seatIds) AND status = 'WAITING'";
+
   private static final String SEAT_MAP =
       """
       SELECT id, row_label, seat_number,
@@ -130,7 +204,13 @@ public class JdbcReservationRepository implements ReservationRepository {
       """;
 
   private static final String CLAIMABLE_NOW =
-      "SELECT id FROM seat WHERE event_id = :eventId AND id IN (:seatIds) AND " + CLAIMABLE;
+      """
+      SELECT id FROM seat
+       WHERE event_id = :eventId AND id IN (:seatIds)
+         AND (status = 'AVAILABLE' OR (status = 'HELD' AND hold_expires_at <= now()))
+         AND
+      """
+          + NO_LIVE_WAITERS_FOR.formatted("seat.id");
 
   private static final String FIND_HOLD =
       """
@@ -200,6 +280,18 @@ public class JdbcReservationRepository implements ReservationRepository {
       (rs, i) ->
           new EventInfo(
               rs.getObject("id", UUID.class), rs.getString("name"), instant(rs, "starts_at"));
+
+  private static final RowMapper<WaitlistView> WAITLIST_VIEW =
+      (rs, i) ->
+          new WaitlistView(
+              rs.getObject("id", UUID.class),
+              rs.getObject("seat_id", UUID.class),
+              rs.getString("row_label") + rs.getInt("seat_number"),
+              rs.getObject("event_id", UUID.class),
+              rs.getString("user_ref"),
+              WaitlistStatus.valueOf(rs.getString("status")),
+              rs.getLong("live_position"),
+              rs.getObject("granted_hold_id", UUID.class));
 
   private final JdbcClient jdbc;
 
@@ -305,16 +397,6 @@ public class JdbcReservationRepository implements ReservationRepository {
   }
 
   @Override
-  public List<SeatChange> releaseSeats(UUID holdId) {
-    return releaseSeatsOfHolds(List.of(holdId));
-  }
-
-  @Override
-  public List<SeatChange> releaseSeatsOfHolds(List<UUID> holdIds) {
-    return jdbc.sql(RELEASE_SEATS).param("holdIds", holdIds).query(SEAT_CHANGE).list();
-  }
-
-  @Override
   public void insertBooking(UUID bookingId, UUID holdId, UUID eventId, String userRef) {
     jdbc.sql(INSERT_BOOKING)
         .param("id", bookingId)
@@ -335,6 +417,97 @@ public class JdbcReservationRepository implements ReservationRepository {
   @Override
   public List<UUID> expireDueHolds(int limit) {
     return jdbc.sql(EXPIRE_DUE_HOLDS).param("limit", limit).query(UUID.class).list();
+  }
+
+  // --- Seat routing ---
+
+  @Override
+  public List<UUID> seatIdsOfHold(UUID holdId) {
+    return jdbc.sql(SEAT_IDS_OF_HOLD).param("holdId", holdId).query(UUID.class).list();
+  }
+
+  @Override
+  public int lockFreedSeat(UUID seatId, UUID oldHoldId) {
+    return jdbc.sql(LOCK_FREED_SEAT)
+        .param("seatId", seatId)
+        .param("oldHoldId", oldHoldId)
+        .query(Integer.class)
+        .list()
+        .size();
+  }
+
+  @Override
+  public SeatChange poolSeat(UUID seatId) {
+    return jdbc.sql(POOL_SEAT).param("seatId", seatId).query(SEAT_CHANGE).single();
+  }
+
+  @Override
+  public SeatChange assignSeatToHold(UUID seatId, UUID holdId, double ttlSeconds) {
+    return jdbc.sql(ASSIGN_SEAT_TO_HOLD)
+        .param("seatId", seatId)
+        .param("holdId", holdId)
+        .param("ttl", ttlSeconds)
+        .query(SEAT_CHANGE)
+        .single();
+  }
+
+  @Override
+  public void deleteHold(UUID holdId) {
+    jdbc.sql("DELETE FROM hold WHERE id = :holdId").param("holdId", holdId).update();
+  }
+
+  // --- Waitlist ---
+
+  @Override
+  public Optional<LockedSeat> lockSeatForJoin(UUID seatId) {
+    return jdbc.sql(LOCK_SEAT_FOR_JOIN)
+        .param("seatId", seatId)
+        .query(
+            (rs, i) -> new LockedSeat(rs.getString("status"), rs.getObject("event_id", UUID.class)))
+        .optional();
+  }
+
+  @Override
+  public void insertWaitlistEntry(UUID entryId, UUID seatId, UUID eventId, String userRef) {
+    jdbc.sql(INSERT_WAITLIST)
+        .param("id", entryId)
+        .param("seatId", seatId)
+        .param("eventId", eventId)
+        .param("userRef", userRef)
+        .update();
+  }
+
+  @Override
+  public Optional<WaitlistView> findWaitlistEntry(UUID entryId) {
+    return jdbc.sql(FIND_WAITLIST_ENTRY).param("entryId", entryId).query(WAITLIST_VIEW).optional();
+  }
+
+  @Override
+  public Optional<HeadWaiter> headWaiter(UUID seatId) {
+    return jdbc.sql(HEAD_WAITER)
+        .param("seatId", seatId)
+        .query(
+            (rs, i) ->
+                new HeadWaiter(
+                    rs.getObject("id", UUID.class),
+                    rs.getObject("event_id", UUID.class),
+                    rs.getString("user_ref")))
+        .optional();
+  }
+
+  @Override
+  public int casGrantWaitlist(UUID entryId, UUID holdId) {
+    return jdbc.sql(CAS_GRANT_WAITLIST).param("entryId", entryId).param("holdId", holdId).update();
+  }
+
+  @Override
+  public int casCancelWaitlist(UUID entryId) {
+    return jdbc.sql(CAS_CANCEL_WAITLIST).param("entryId", entryId).update();
+  }
+
+  @Override
+  public int cancelWaitingOnSeats(List<UUID> seatIds) {
+    return jdbc.sql(CANCEL_WAITING_ON_SEATS).param("seatIds", seatIds).update();
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {

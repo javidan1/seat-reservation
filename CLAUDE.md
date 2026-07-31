@@ -21,14 +21,19 @@ docker compose up -d          # Postgres 16 on :5432 (seatres/seatres)
 2. **Time authority is Postgres `now()`**. Never compare expiry against `Instant.now()` in
    Java for a correctness decision. Tests time-travel by mutating `expires_at`, not by sleeping.
 3. **Correctness must never depend on the sweeper running.** The claim predicate reclaims
-   expired holds (`status='HELD' AND hold_expires_at <= now()`); the sweeper is UI freshness only.
-4. **Multi-seat claims lock in sorted id order** (`ORDER BY id FOR UPDATE` subquery) to
-   prevent deadlocks. Keep it that way.
-5. **Isolation is READ COMMITTED** — the design depends on Postgres re-evaluating UPDATE
+   expired holds (`status='HELD' AND hold_expires_at <= now()`); the sweeper is UI freshness plus
+   ONE liveness duty — granting waitlisted seats of lapsed holds. Never give it a correctness duty.
+4. **The seat row serializes waitlist traffic.** Joins lock it FOR SHARE and trust only the
+   post-lock status; the freeing routine locks it FOR UPDATE before reading the queue. Breaking
+   this recreates the stranded AVAILABLE-with-waiters seat. Never lock or SKIP LOCKED the
+   waitlist head SELECT (fairness).
+5. **Multi-seat claims and the freeing routine lock seats in sorted id order** to prevent
+   deadlocks. Keep it that way.
+6. **Isolation is READ COMMITTED** — the design depends on Postgres re-evaluating UPDATE
    predicates after lock waits. Do not add custom isolation levels.
-6. **SSE events are published only after commit** (`@TransactionalEventListener(AFTER_COMMIT)`)
+7. **SSE events are published only after commit** (`@TransactionalEventListener(AFTER_COMMIT)`)
    and carry the seat `version`; clients drop stale versions.
-7. Layer rules are enforced by `ArchitectureTest` (ArchUnit): `domain` depends on nothing;
+8. Layer rules are enforced by `ArchitectureTest` (ArchUnit): `domain` depends on nothing;
    SQL lives only in `infra.persistence`; `infra.web` never touches persistence directly.
 
 ## Definition of done

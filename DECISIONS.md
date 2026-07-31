@@ -78,10 +78,24 @@ reclaimable). `PartialConfirmGuardIT` pins the nastiest anomaly; `ArchitectureTe
 enforces the layer rules in CLAUDE.md instead of trusting intentions. A short storm runs in CI on
 every push; `./gradlew stressTest` runs the full one.
 
+## The waitlist (stretch 2)
+
+Per-seat FIFO queues, joinable while a seat is HELD. "Defensible order" is a server-assigned
+`GENERATED ALWAYS AS IDENTITY` position — monotonic, client-tamper-proof, and grants always take
+the minimum committed position (join is observable only at commit, so the order is linearizable).
+A freed seat is granted to the head waiter as a **normal 1-seat hold** — confirm, release, expiry
+and the double-sell guarantees all apply unchanged — and direct claims (including lazy reclaims)
+are blocked while anyone waits. The genuinely hard part was a race the adversarial design review
+caught before implementation: a join racing a release could commit a WAITING entry against a seat
+that just went AVAILABLE, freezing it forever under the waiter-priority predicate. The fix makes
+the **seat row the serialization point**: joins take `FOR SHARE` and trust only the post-lock
+status; the freeing routine locks each seat `FOR UPDATE` (in id order, matching the claim's lock
+order) *before* reading its queue. One honest trade-off, stated rather than hidden: grant
+*liveness* for lapsed holds rides the 1s sweeper — correctness (no double-sell, no partial
+confirm) remains sweeper-independent, proven by `WaitlistIT` with the scheduler disabled.
+
 ## Consciously cut (and why)
 
-- **Waitlist** (stretch 2): a real feature, not an afternoon one. Sketch: `waitlist` table with
-  arrival order, claim-on-release via `FOR UPDATE SKIP LOCKED` consumer, same CAS discipline.
 - **Auth**: the hold UUID is a capability token; real identity is orthogonal to the concurrency
   problem being assessed.
 - **Hold TTL renewal**: it's where the deliberate `hold.expires_at` / `seat.hold_expires_at`
@@ -100,7 +114,7 @@ ARM64 → ALB. Deliberate demo-stack shortcuts are listed in `infra/README.md` r
 
 ## With more time
 
-Waitlist done properly; `LISTEN/NOTIFY` fan-out; a jqwik model-based state-machine test (random
+`LISTEN/NOTIFY` fan-out; a jqwik model-based state-machine test (random
 interleavings of hold/confirm/release/expire checked against a reference model); metrics
 (claim-conflict rate is the interesting one); and idempotency keys on `POST /holds` so a client
 retry after a network timeout can't double-hold.
