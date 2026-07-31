@@ -19,7 +19,9 @@ docker compose up -d          # Postgres 16 on :5432 (seatres/seatres)
    `JdbcReservationRepository`. Never read-modify-write seat state in Java. Never add a
    transition without a rowcount assertion.
 2. **Time authority is Postgres `now()`**. Never compare expiry against `Instant.now()` in
-   Java for a correctness decision. Tests time-travel by mutating `expires_at`, not by sleeping.
+   Java for a correctness decision — `ArchitectureTest` bans `Instant.now()` and
+   `System.currentTimeMillis()` in main code outright. Tests time-travel by mutating
+   `expires_at`, not by sleeping.
 3. **Correctness must never depend on the sweeper running.** The claim predicate reclaims
    expired holds (`status='HELD' AND hold_expires_at <= now()`); the sweeper is UI freshness plus
    ONE liveness duty — granting waitlisted seats of lapsed holds. Never give it a correctness duty.
