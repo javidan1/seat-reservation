@@ -5,7 +5,7 @@ plugins {
 	id("com.diffplug.spotless") version "7.2.1"
 }
 
-group = "com.jmammadov"
+group = "com.seatres"
 version = "0.0.1-SNAPSHOT"
 description = "Seat reservation service"
 
