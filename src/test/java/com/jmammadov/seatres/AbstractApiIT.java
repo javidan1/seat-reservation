@@ -49,6 +49,7 @@ public abstract class AbstractApiIT {
     client = RestClient.builder().baseUrl("http://localhost:" + port).build();
     jdbc.sql("DELETE FROM booking_seat").update();
     jdbc.sql("DELETE FROM booking").update();
+    jdbc.sql("DELETE FROM waitlist").update();
     jdbc.sql(
             "UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, hold_expires_at = NULL,"
                 + " version = 0")
@@ -165,6 +166,15 @@ public abstract class AbstractApiIT {
     return jdbc.sql(
             "SELECT count(*) FROM seat s WHERE s.status = 'SOLD' AND NOT EXISTS"
                 + " (SELECT 1 FROM booking_seat bs WHERE bs.seat_id = s.id)")
+        .query(Long.class)
+        .single();
+  }
+
+  /** Tripwire for the stranded-seat race: a WAITING entry must always watch a HELD seat. */
+  protected long waitersOnNonHeldSeats() {
+    return jdbc.sql(
+            "SELECT count(*) FROM waitlist w JOIN seat s ON s.id = w.seat_id"
+                + " WHERE w.status = 'WAITING' AND s.status <> 'HELD'")
         .query(Long.class)
         .single();
   }

@@ -108,6 +108,7 @@ class NoDoubleSellStressIT extends AbstractApiIT {
             .query(Long.class)
             .single();
     assertThat(bookingSeatsOnUnsold).as("booking rows pointing at unsold seats").isZero();
+    assertThat(waitersOnNonHeldSeats()).as("stranded waitlist entries").isZero();
     long dbBookings = jdbc.sql("SELECT count(*) FROM booking").query(Long.class).single();
     assertThat(dbBookings)
         .as("every client-visible confirm has exactly one booking row")
