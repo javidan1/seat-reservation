@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seat Reservation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="map-panel">
+      <header>
+        <h1 id="event-name">Loading…</h1>
+        <p id="event-date" class="muted"></p>
+      </header>
+      <div class="stage">STAGE</div>
+      <div id="seat-map" class="seat-map" aria-label="Seat map"></div>
+      <ul class="legend">
+        <li><span class="chip available"></span> Available</li>
+        <li><span class="chip selected"></span> Your selection</li>
+        <li><span class="chip mine"></span> Your hold</li>
+        <li><span class="chip held"></span> Held by others</li>
+        <li><span class="chip sold"></span> Sold</li>
+      </ul>
+    </section>
+
+    <aside class="side-panel">
+      <h2>Your seats</h2>
+      <p class="muted">You are <strong id="user-ref"></strong></p>
+
+      <div id="selection-box">
+        <p id="selection-summary" class="muted">Click available seats to select (up to 8).</p>
+        <button id="hold-btn" disabled>Hold seats</button>
+      </div>
+
+      <div id="hold-box" hidden>
+        <p>Holding <strong id="hold-seats"></strong></p>
+        <p class="countdown"><span id="countdown">–</span>s left to check out</p>
+        <button id="confirm-btn" class="primary">Confirm booking</button>
+        <button id="release-btn" class="ghost">Release seats</button>
+      </div>
+
+      <div id="booking-box" hidden>
+        <h3>🎟️ Booked!</h3>
+        <p id="booking-summary"></p>
+        <p class="muted tiny">Booking <span id="booking-id"></span></p>
+        <button id="again-btn" class="ghost">Book more seats</button>
+      </div>
+
+      <p id="toast" class="toast" hidden></p>
+    </aside>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
