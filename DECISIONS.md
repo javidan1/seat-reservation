@@ -89,9 +89,14 @@ every push; `./gradlew stressTest` runs the full one.
 - **Cross-instance SSE fan-out** (`LISTEN/NOTIFY`): clients of instance A don't see instance B's
   commits live; the snapshot-on-reconnect heals it. Correctness is unaffected.
 - **Payments/pricing, seat categories**: out of scope for the assessed problem.
-- **Cloud/IaC bonus**: declined per the brief's own advice — the evening went to the correctness
-  evidence. The path would be ECS Fargate + RDS via Terraform; Docker Compose keeps local runs
-  reproducible meanwhile.
+
+## Cloud deployment (bonus)
+
+`infra/` is a complete Terraform path from nothing to running on AWS: VPC → RDS Postgres 16
+(private subnets, password generated into SSM — never in a task definition) → ECS Fargate on
+ARM64 → ALB. Deliberate demo-stack shortcuts are listed in `infra/README.md` rather than hidden
+(HTTP-only, single-AZ, no NAT, local state). Because correctness lives entirely in the database,
+`app_count = 2` runs the multi-instance guarantee in the cloud unchanged.
 
 ## With more time
 

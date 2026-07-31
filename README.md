@@ -52,6 +52,14 @@ The tests that carry the correctness claims:
 | `GET /api/bookings/{id}` | booking with its seats |
 | `GET /api/events/{id}/stream` | SSE: versioned committed seat changes |
 
+## Cloud deployment (bonus)
+
+The service runs on AWS with all infrastructure defined in Terraform — see
+[infra/README.md](infra/README.md) for the one-command path (VPC, RDS Postgres 16, ECS Fargate
+on ARM64, ALB, secrets in SSM) and its deliberately documented demo-stack shortcuts. The live
+demo stack is torn down after review (`terraform destroy`) rather than left idling; `terraform
+apply` reproduces it from scratch in ~10 minutes.
+
 ## How this was built
 
 Authored agentically with Claude Code as the primary mode of work, directed by the repo's own
