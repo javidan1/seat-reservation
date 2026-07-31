@@ -18,6 +18,18 @@ jobs:
       - name: Verification gate (format + fast tests, Testcontainers)
         run: ./gradlew spotlessCheck test
 
+  # Every push scans the ENTIRE git history for leaked credentials — a secret
+  # committed then deleted is still leaked, so the tip alone is never enough.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Feeds the resolved (transitive) dependency graph to GitHub so Dependabot
   # alerts cover what Gradle actually ships, not just what build.gradle.kts names.
   dependency-graph:

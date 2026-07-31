@@ -4,8 +4,8 @@
 
 The brief's visible requirement is "never sell a seat twice." The hidden one is the **hold
 lifecycle**: the three-way race between a customer confirming, their hold lapsing, and the seats
-being reclaimed — on a **multi-seat** hold. Naive designs fail here in two ugly ways: a partial
-confirm (customer charged for one of their two seats) or a resurrected hold (expired seats sold
+being reclaimed — on a **multi-seat** hold. Naive designs fail as a partial confirm (a customer
+charged for one of two seats) or a resurrected hold (expired seats sold
 anyway). Everything below is shaped by that reading. The quieter second trap: "fast,
 accurate-enough availability" licenses plain snapshot reads — locking the seat map would solve a
 problem the brief didn't pose.
@@ -16,7 +16,7 @@ Postgres is the single source of truth and the single clock. Correctness rests o
 independent layers, any one of which suffices:
 
 1. **Predicate CAS.** Every state transition is one conditional `UPDATE` whose `WHERE` clause
-   decides the race atomically (`JdbcReservationRepository` is the whole story, ~6 statements).
+   decides the race atomically (`JdbcReservationRepository`, ~6 statements).
    The claim predicate also accepts seats whose hold has lapsed (`hold_expires_at <= now()`), so
    expired inventory is sellable **even if the background sweeper never runs** — the sweeper is a
    janitor for UI freshness, not a correctness dependency.
@@ -30,8 +30,8 @@ independent layers, any one of which suffices:
 
 Supporting stances:
 
-- **Time authority is `now()`** — transaction-stable, identical across app instances, and it lets
-  tests time-travel by rewriting `expires_at` instead of sleeping.
+- **Time authority is `now()`** — transaction-stable, identical across instances, and it lets
+  tests time-travel by rewriting `expires_at`.
 - **READ COMMITTED, explicitly.** After a row-lock wait Postgres re-evaluates the `UPDATE`'s
   predicate against the newly committed row, so a race's loser simply matches zero rows and gets a
   clean 409/410; REPEATABLE READ would abort it with a serialization error and force retry
@@ -57,9 +57,8 @@ Supporting stances:
 - **WebSockets.** SSE is plain HTTP, auto-reconnects, and halves the moving parts. Versioned
   events make ordering and duplicates non-issues; a snapshot re-fetch on reconnect heals gaps;
   pure expiry (no write, hence no event) is flipped client-side on the countdown.
-- **A frontend framework.** The UI is a seat grid, a countdown, and three buttons — one page of
-  vanilla JS served from Spring's static resources. A React+Vite toolchain would be résumé-driven
-  scope.
+- **A frontend framework.** A seat grid, a countdown, three buttons — one page of vanilla JS
+  from Spring's static resources; a React toolchain would be résumé-driven scope.
 
 ## Testing strategy
 
@@ -82,19 +81,18 @@ Per-seat FIFO queues, joinable while a seat is HELD. "Defensible order" = a serv
 identity-column position; grants take the minimum committed position (joins are observable only at
 commit, so the order is linearizable). A freed seat becomes a **normal 1-seat hold** for the head
 waiter — confirm/release/expiry and the double-sell guarantees apply unchanged — and direct claims
-(including lazy reclaims) are blocked while anyone waits. The hard part was a race caught in
-adversarial design review before implementation: a join racing a release could commit a WAITING
-entry against a just-freed seat, freezing it forever under the waiter-priority predicate. The fix
-makes the **seat row the serialization point**: joins take `FOR SHARE` and trust only the
-post-lock status; the freeing routine locks each seat `FOR UPDATE` (in id order, matching the
-claim's lock order) *before* reading its queue. One stated trade-off: grant *liveness* for lapsed
-holds rides the 1s sweeper; correctness remains sweeper-independent, proven by `WaitlistIT` with
-the scheduler disabled.
+(including lazy reclaims) are blocked while anyone waits. The hard part: a race caught in design review
+before implementation — a join racing a release could commit a WAITING entry against a just-freed
+seat, freezing it forever under the waiter-priority predicate. The fix makes the **seat row the
+serialization point**: joins take `FOR SHARE` and trust only the post-lock status; the freeing
+routine locks each seat `FOR UPDATE` (in id order, matching the claim's lock order) *before*
+reading its queue. Stated trade-off: lapsed-hold grant *liveness* rides the 1s sweeper;
+correctness stays sweeper-independent (proven with the scheduler disabled).
 
 ## Consciously cut (and why)
 
-- **Auth**: the hold UUID is a capability token; real identity is orthogonal to the concurrency
-  problem being assessed.
+- **Auth**: hold UUIDs are capability tokens; identity is orthogonal to the assessed
+  concurrency problem.
 - **Hold TTL renewal**: the one place the deliberate `expires_at` duplication would bite;
   excluded rather than half-done.
 - **Cross-instance SSE fan-out** (`LISTEN/NOTIFY`): instance A's clients miss B's commits live;
@@ -107,13 +105,18 @@ the scheduler disabled.
 (private subnets; the password is RDS-managed in Secrets Manager, so no Terraform state ever
 contains it) → ECS Fargate on ARM64 (non-root container) → ALB → CloudFront TLS edge
 (browser-trusted HTTPS without owning a domain; the ALB admits only CloudFront's IP range).
-State is encrypted, versioned S3. Remaining demo shortcuts are listed in `infra/README.md`
-rather than hidden (edge→origin HTTP, single-AZ, no NAT). Because correctness lives entirely in
-the database, `app_count = 2` runs the multi-instance guarantee in the cloud unchanged.
+State is encrypted, versioned S3. Remaining shortcuts stay listed in `infra/README.md`
+(edge→origin HTTP, single-AZ, no NAT). Because correctness lives entirely in the database,
+`app_count = 2` runs the multi-instance guarantee in the cloud unchanged.
 
-## With more time
+## With more time — and one thing done differently
 
-`LISTEN/NOTIFY` fan-out; a jqwik model-based state-machine test (random
-interleavings of hold/confirm/release/expire checked against a reference model); metrics
-(claim-conflict rate is the interesting one); and idempotency keys on `POST /holds` so a client
-retry after a network timeout can't double-hold.
+With more time: `LISTEN/NOTIFY` SSE fan-out (~half a day); a jqwik model-based state-machine
+test — random interleavings against a reference model (~a day); metrics, starting with
+claim-conflict rate (~hours); idempotency keys on `POST /holds` so a client retry can't
+double-hold (~half a day).
+
+Done differently: a standing agent rule from day one — now in CLAUDE.md — that **the agent finds
+risks, but only a human accepts them**. An early draft classified HTTP-only transport as an
+"accepted risk" on the agent's own authority; challenged, it was fixed in an evening (CloudFront
+TLS edge). Assumed acceptance hides cheap fixes; acceptance is a decision, not a default.

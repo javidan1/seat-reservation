@@ -38,6 +38,15 @@ docker compose up -d          # Postgres 16 on :5432 (seatres/seatres)
 8. Layer rules are enforced by `ArchitectureTest` (ArchUnit): `domain` depends on nothing;
    SQL lives only in `infra.persistence`; `infra.web` never touches persistence directly.
 
+## Decision protocol — the agent finds, a human accepts
+
+Never classify a risk, limitation, or scope cut as "accepted" on your own authority. Surface it
+with severity, cost-to-fix-now, and cost-to-fix-later, then let the human decide. Anything
+labeled "accepted" in the docs means accepted *by a named human decision*, never assumed. When
+deadline pressure collides with a security or correctness gap, present the trade — do not
+resolve it silently. (Origin: an early draft called HTTP-only transport an "accepted risk";
+challenged, it was fixed in an evening. Assumed acceptance hides cheap fixes.)
+
 ## Definition of done
 
 - `./gradlew spotlessCheck test` green.
