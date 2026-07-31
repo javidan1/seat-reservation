@@ -44,6 +44,16 @@ request — nothing here is reconstructed after the fact.
    Postgres owned `127.0.0.1:5432`, shadowing the Docker container. Rather than touching the
    local install, the compose port moved to 5433 — which also protects whoever clones this repo
    from the same collision.
+5. **The stranded-seat race, caught before a line of code.** The waitlist (attempted after an
+   initial conscious cut, on an explicit go decision with a revert branch as the safety net) went
+   through the same adversarial design review as the original architecture. The review found that
+   the obvious design — "join checks the seat is HELD, then inserts" — loses a race against a
+   concurrent release: the entry commits against a seat that just went AVAILABLE, and the new
+   waiter-priority claim predicate then freezes that seat *forever*. It also caught a
+   foreign-key-ordering bug in the grant loop. Both were fixed in the design (seat row as the
+   serialization point, hold inserted before the entry references it) before implementation
+   started. *Lesson: the more a change touches load-bearing semantics, the more the review pass
+   pays — this one turned a would-be production incident into a paragraph in DECISIONS.md.*
 
 ## Trust heuristics I applied
 

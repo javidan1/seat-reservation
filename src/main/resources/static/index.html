@@ -33,6 +33,19 @@
         <button id="hold-btn" disabled>Hold seats</button>
       </div>
 
+      <div id="join-box" hidden>
+        <p>Seat <strong id="join-seat-label"></strong> is held by someone else.</p>
+        <p class="muted">If they release it or their hold expires, you get first claim.</p>
+        <button id="join-btn">Join waitlist</button>
+        <button id="join-cancel-btn" class="ghost">Never mind</button>
+      </div>
+
+      <div id="waitlist-box" hidden>
+        <p>Waiting for <strong id="wait-seat-label"></strong></p>
+        <p class="muted">Position in line: <strong id="wait-position">–</strong></p>
+        <button id="wait-cancel-btn" class="ghost">Leave waitlist</button>
+      </div>
+
       <div id="hold-box" hidden>
         <p>Holding <strong id="hold-seats"></strong></p>
         <p class="countdown"><span id="countdown">–</span>s left to check out</p>
