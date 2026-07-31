@@ -17,6 +17,13 @@ class ReservationApiIT extends AbstractApiIT {
     assertThat(holdSeats("alice", Collections.emptyList()).status()).isEqualTo(400);
     assertThat(holdSeats("alice", row.subList(0, 9)).status()).isEqualTo(400); // > max 8
     assertThat(holdSeats("  ", row.subList(0, 1)).status()).isEqualTo(400);
+    assertThat(holdSeats("x".repeat(65), row.subList(0, 1)).status()).isEqualTo(400); // > 64 chars
+    assertThat(
+            post(
+                    "/api/events/" + EVENT + "/waitlist",
+                    java.util.Map.of("userRef", "x".repeat(65), "seatId", row.get(0)))
+                .status())
+        .isEqualTo(400);
   }
 
   @Test

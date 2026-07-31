@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class ReservationService {
 
   static final int MAX_SEATS_PER_HOLD = 8;
+  static final int MAX_USER_REF_LENGTH = 64;
 
   private final ReservationRepository repo;
   private final TransactionTemplate tx;
@@ -57,9 +58,7 @@ public class ReservationService {
       throw new IllegalArgumentException(
           "A hold must cover between 1 and " + MAX_SEATS_PER_HOLD + " seats");
     }
-    if (userRef == null || userRef.isBlank()) {
-      throw new IllegalArgumentException("userRef is required");
-    }
+    requireValidUserRef(userRef);
     repo.findEvent(eventId).orElseThrow(() -> new EventNotFoundException(eventId));
 
     double ttlSeconds = properties.holdTtl().toSeconds();
@@ -127,6 +126,17 @@ public class ReservationService {
 
   public Optional<HoldView> hold(UUID holdId) {
     return repo.findHold(holdId);
+  }
+
+  /** Caller-supplied identity is untrusted input: bounded, never just non-blank. */
+  public static void requireValidUserRef(String userRef) {
+    if (userRef == null || userRef.isBlank()) {
+      throw new IllegalArgumentException("userRef is required");
+    }
+    if (userRef.length() > MAX_USER_REF_LENGTH) {
+      throw new IllegalArgumentException(
+          "userRef must be at most " + MAX_USER_REF_LENGTH + " characters");
+    }
   }
 
   public Optional<Booking> booking(UUID bookingId) {

@@ -42,9 +42,7 @@ public class WaitlistService {
   }
 
   public WaitlistView join(UUID eventId, UUID seatId, String userRef) {
-    if (userRef == null || userRef.isBlank()) {
-      throw new IllegalArgumentException("userRef is required");
-    }
+    ReservationService.requireValidUserRef(userRef);
     repo.findEvent(eventId).orElseThrow(() -> new EventNotFoundException(eventId));
     return tx.execute(
         status -> {

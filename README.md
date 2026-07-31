@@ -58,10 +58,13 @@ The tests that carry the correctness claims:
 ## Cloud deployment (bonus)
 
 The service runs on AWS with all infrastructure defined in Terraform — see
-[infra/README.md](infra/README.md) for the one-command path (VPC, RDS Postgres 16, ECS Fargate
-on ARM64, ALB, secrets in SSM) and its deliberately documented demo-stack shortcuts. The live
-demo stack is torn down after review (`terraform destroy`) rather than left idling; `terraform
-apply` reproduces it from scratch in ~10 minutes.
+[infra/README.md](infra/README.md) for the one-command path (VPC, RDS Postgres 16 with an
+RDS-managed password that never touches Terraform state, ECS Fargate on ARM64 as non-root,
+ALB behind a CloudFront TLS edge) and its deliberately documented demo-stack shortcuts. The
+live demo stack is torn down after review (`terraform destroy`) rather than left idling;
+`terraform apply` reproduces it from scratch in ~10 minutes. Dependency hygiene is automated:
+Dependabot watches four ecosystems and CI submits the resolved Gradle graph so alerts cover
+transitives.
 
 ## How this was built
 

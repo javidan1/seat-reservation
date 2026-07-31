@@ -1,15 +1,21 @@
-# Tiered security groups: world -> ALB (80) -> app (8080) -> database (5432).
+# Tiered security groups: CloudFront -> ALB (80) -> app (8080) -> database (5432).
+
+# AWS-managed list of CloudFront's origin-facing IPs: the ALB is unreachable
+# except through the TLS edge.
+data "aws_ec2_managed_prefix_list" "cloudfront_origin" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
 
 resource "aws_security_group" "alb" {
   name_prefix = "${var.app_name}-alb-"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "HTTP from anywhere"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTP from CloudFront only"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_ec2_managed_prefix_list.cloudfront_origin.id]
   }
 
   egress {

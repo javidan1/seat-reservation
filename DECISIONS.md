@@ -104,10 +104,12 @@ the scheduler disabled.
 ## Cloud deployment (bonus)
 
 `infra/` is a complete Terraform path from nothing to running on AWS: VPC → RDS Postgres 16
-(private subnets, password generated into SSM — never in a task definition) → ECS Fargate on
-ARM64 → ALB. Deliberate demo-stack shortcuts are listed in `infra/README.md` rather than hidden
-(HTTP-only, single-AZ, no NAT, local state). Because correctness lives entirely in the database,
-`app_count = 2` runs the multi-instance guarantee in the cloud unchanged.
+(private subnets; the password is RDS-managed in Secrets Manager, so no Terraform state ever
+contains it) → ECS Fargate on ARM64 (non-root container) → ALB → CloudFront TLS edge
+(browser-trusted HTTPS without owning a domain; the ALB admits only CloudFront's IP range).
+State is encrypted, versioned S3. Remaining demo shortcuts are listed in `infra/README.md`
+rather than hidden (edge→origin HTTP, single-AZ, no NAT). Because correctness lives entirely in
+the database, `app_count = 2` runs the multi-instance guarantee in the cloud unchanged.
 
 ## With more time
 

@@ -7,9 +7,11 @@ RUN ./gradlew --no-daemon dependencies --quiet || true
 COPY src ./src
 RUN ./gradlew --no-daemon bootJar
 
-# Runtime stage: JRE only.
+# Runtime stage: JRE only, non-root.
 FROM eclipse-temurin:21-jre
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
+USER appuser
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

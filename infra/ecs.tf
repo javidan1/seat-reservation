@@ -30,8 +30,8 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 
 data "aws_iam_policy_document" "read_db_password" {
   statement {
-    actions   = ["ssm:GetParameters"]
-    resources = [aws_ssm_parameter.db_password.arn]
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_db_instance.postgres.master_user_secret[0].secret_arn]
   }
 }
 
@@ -74,7 +74,8 @@ resource "aws_ecs_task_definition" "app" {
       secrets = [
         {
           name      = "SPRING_DATASOURCE_PASSWORD"
-          valueFrom = aws_ssm_parameter.db_password.arn
+          # RDS-managed secret is JSON {username, password}; select the password key.
+          valueFrom = "${aws_db_instance.postgres.master_user_secret[0].secret_arn}:password::"
         }
       ]
 
