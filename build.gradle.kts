@@ -9,6 +9,12 @@ group = "com.seatres"
 version = "0.0.1-SNAPSHOT"
 description = "Seat reservation service"
 
+// Security patches ahead of the Boot BOM (Dependabot: 1 high, 2 moderate).
+// Drop these overrides once a Boot release manages the patched versions.
+extra["postgresql.version"] = "42.7.12" // channel-binding auth downgrade (high)
+extra["commons-lang3.version"] = "3.18.0" // uncontrolled recursion
+extra["jackson-bom.version"] = "3.1.5" // @JsonView bypass on @JsonUnwrapped
+
 java {
 	toolchain {
 		languageVersion = JavaLanguageVersion.of(21)
