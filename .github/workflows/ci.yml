@@ -22,6 +22,11 @@ jobs:
   # committed then deleted is still leaked, so the tip alone is never enough.
   secret-scan:
     runs-on: ubuntu-latest
+    # Dependabot-triggered runs get a restricted token; gitleaks lists PR commits
+    # via the API, so grant the read scopes it needs explicitly.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
