@@ -2,6 +2,7 @@ plugins {
 	java
 	id("org.springframework.boot") version "4.1.0"
 	id("io.spring.dependency-management") version "1.1.7"
+	id("com.diffplug.spotless") version "7.2.1"
 }
 
 group = "com.jmammadov"
@@ -30,9 +31,36 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	testImplementation("org.awaitility:awaitility")
+	testImplementation("com.tngtech.archunit:archunit-junit5:1.4.1")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.withType<Test> {
-	useJUnitPlatform()
+spotless {
+	java {
+		googleJavaFormat()
+		formatAnnotations()
+	}
+}
+
+// Fast suite: everything except @Tag("load"). Runs in CI on every push.
+tasks.test {
+	useJUnitPlatform {
+		excludeTags("load")
+	}
+}
+
+// Full-size stress runs, kept out of the default build so CI stays fast.
+// Usage: ./gradlew stressTest [-Pstress.threads=400]
+tasks.register<Test>("stressTest") {
+	description = "Runs the full-size concurrency stress suite (@Tag(\"load\"))."
+	group = "verification"
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("load")
+	}
+	systemProperty("stress.full", "true")
+	findProperty("stress.threads")?.let { systemProperty("stress.threads", it) }
+	shouldRunAfter(tasks.test)
 }

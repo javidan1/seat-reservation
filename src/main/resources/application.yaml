@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: seat-reservation
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/seatres
+    username: seatres
+    password: seatres
+
+server:
+  port: 8080
+
+seatres:
+  # How long a hold keeps seats before it lapses. Short enough to watch expire in a demo.
+  hold-ttl: 60s
+  sweeper:
+    # The sweeper only keeps the UI fresh; correctness never depends on it (see DECISIONS.md).
+    enabled: true
+    interval: 1s
