@@ -31,3 +31,8 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/dependency-submission@v4
+        env:
+          # Scan what ships and what runs in CI — app classpaths only. The Gradle
+          # plugins' own bundled dependencies (buildscript classpath) are pinned by
+          # the plugins and not part of the delivered artifact.
+          DEPENDENCY_GRAPH_INCLUDE_CONFIGURATIONS: "(compileClasspath|runtimeClasspath|testCompileClasspath|testRuntimeClasspath)"
