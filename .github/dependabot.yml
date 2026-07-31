@@ -1,13 +1,21 @@
 version: 2
 updates:
+  # Minor/patch bumps arrive grouped in one PR per ecosystem; majors stay
+  # separate because they deserve individual review.
   - package-ecosystem: gradle
     directory: /
     schedule:
       interval: weekly
+    groups:
+      gradle-minor-patch:
+        update-types: ["minor", "patch"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
   - package-ecosystem: docker
     directory: /
     schedule:
