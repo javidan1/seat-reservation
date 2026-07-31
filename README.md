@@ -73,5 +73,6 @@ instead of trusting them. [docs/AGENT_NOTES.md](docs/AGENT_NOTES.md) documents t
 honestly — including the agent-introduced errors that review caught, and where the design review
 changed the design. Commits are incremental and co-authored transparently.
 
-**Time spent:** ~4 hours for planning, core, evidence suite, UI and docs (one evening), plus a
-short morning pass for the two-instance stretch demo and polish.
+**Time spent:** roughly 6 hours across one evening — planning and adversarial design review
+(~45 min), core + evidence suite + UI + docs (~2.5 h), cloud deployment (~1 h), the waitlist
+stretch (~1.25 h), and review/polish in between.

@@ -6,9 +6,9 @@ The brief's visible requirement is "never sell a seat twice." The hidden one is 
 lifecycle**: the three-way race between a customer confirming, their hold lapsing, and the seats
 being reclaimed — on a **multi-seat** hold. Naive designs fail here in two ugly ways: a partial
 confirm (customer charged for one of their two seats) or a resurrected hold (expired seats sold
-anyway). Everything below is shaped by that reading. A second, quieter trap: "fast,
-accurate-enough availability" licenses plain snapshot reads — wrapping the seat map in locks would
-be solving a problem the brief explicitly didn't pose.
+anyway). Everything below is shaped by that reading. The quieter second trap: "fast,
+accurate-enough availability" licenses plain snapshot reads — locking the seat map would solve a
+problem the brief didn't pose.
 
 ## Core architecture: the database is the only arbiter
 
@@ -33,33 +33,30 @@ Supporting stances:
 - **Time authority is `now()`** — transaction-stable, identical across app instances, and it lets
   tests time-travel by rewriting `expires_at` instead of sleeping.
 - **READ COMMITTED, explicitly.** After a row-lock wait Postgres re-evaluates the `UPDATE`'s
-  predicate against the newly committed row, so the loser of a race simply matches zero rows and
-  gets a clean 409/410. REPEATABLE READ would abort the loser with a serialization error and force
-  retry machinery for zero benefit.
+  predicate against the newly committed row, so a race's loser simply matches zero rows and gets a
+  clean 409/410; REPEATABLE READ would abort it with a serialization error and force retry
+  machinery for nothing.
 - **Deadlock-proof claims.** Multi-seat claims lock rows via an `ORDER BY id FOR UPDATE` subquery
   (deterministic order), with one retry as insurance.
-- **Fairness = first-committed-wins.** Postgres row-lock waits are FIFO, losers get an immediate,
-  deterministic 409 naming exactly the contested seats, and all-or-nothing claims mean no partial
-  grabs. Predictable beats elaborate.
-- **Multi-instance safety falls out for free** because every mechanism above lives in the
-  database. `MultiInstanceStressIT` runs two full app processes against one Postgres and re-checks
-  the invariants.
+- **Fairness = first-committed-wins.** Row-lock waits are FIFO; losers get an immediate 409
+  naming the contested seats; all-or-nothing claims mean no partial grabs. Predictable beats
+  elaborate.
+- **Multi-instance safety falls out for free** — every mechanism lives in the database;
+  `MultiInstanceStressIT` re-checks the invariants across two app processes sharing one Postgres.
 
 ## Alternatives considered and rejected
 
-- **Redis / distributed locks / in-memory holds.** The contended state *is* durable state; a
-  second locking system adds a consistency boundary (and a failure mode) without removing the
-  database write. Row locks are the lock service.
-- **JPA.** The correctness mechanism here is "conditional UPDATE, check the row count." An ORM
-  buries exactly that under session caching and dirty checking. `JdbcClient` keeps the six
-  critical statements visible, reviewable artifacts. (Spring Data JDBC rejected for the same
-  reason at smaller scale: aggregate mapping buys nothing here.)
+- **Redis / distributed locks / in-memory holds.** Contended state *is* durable state; a second
+  locking system adds a consistency boundary and a failure mode without removing the database
+  write. Row locks are the lock service.
+- **JPA.** The correctness mechanism here is "conditional UPDATE, check the row count" — an ORM
+  buries exactly that under session caching and dirty checking. `JdbcClient` keeps the critical
+  statements visible, reviewable artifacts. (Spring Data JDBC: same reason, smaller scale.)
 - **SERIALIZABLE / REPEATABLE READ.** See above — strictly worse ergonomics for this access
   pattern.
-- **WebSockets.** One-directional fan-out doesn't need them; SSE is plain HTTP, auto-reconnects,
-  and halves the moving parts. Clients drop events older than the per-seat `version`, so ordering
-  and duplicates are non-issues; a snapshot re-fetch on reconnect heals gaps. One deliberate
-  wrinkle: pure expiry emits no event (nothing was written), so clients flip lapsed seats locally.
+- **WebSockets.** SSE is plain HTTP, auto-reconnects, and halves the moving parts. Versioned
+  events make ordering and duplicates non-issues; a snapshot re-fetch on reconnect heals gaps;
+  pure expiry (no write, hence no event) is flipped client-side on the countdown.
 - **A frontend framework.** The UI is a seat grid, a countdown, and three buttons — one page of
   vanilla JS served from Spring's static resources. A React+Vite toolchain would be résumé-driven
   scope.
@@ -67,41 +64,41 @@ Supporting stances:
 ## Testing strategy
 
 Every claim the code can't show by reading gets a runnable proof; tests never sleep to reach
-expiry, they time-travel through the DB clock. The three that matter most: **ExpiryConfirmRaceIT**
-(sweeper disabled throughout — lapsed holds are rejected, their seats claimable with no background
-job, and 20 rounds of confirm-vs-reclaim at the boundary never double-win),
-**NoDoubleSellStressIT** (a virtual-thread storm over a hot seat block; client-side booking ledger
-and DB invariants must agree: 200 workers / 6,000 attempts / 0 double-sells), and
-**RestartDurabilityIT** (the Spring context is genuinely torn down and rebooted against the same
-database; bookings survive, in-flight holds still confirm, holds lapsed during downtime are
-reclaimable). `PartialConfirmGuardIT` pins the nastiest anomaly; `ArchitectureTest` (ArchUnit)
-enforces the layer rules in CLAUDE.md instead of trusting intentions. A short storm runs in CI on
-every push; `./gradlew stressTest` runs the full one.
+expiry, they time-travel through the DB clock. The core evidence: **ExpiryConfirmRaceIT** (sweeper
+disabled throughout — lapsed holds rejected, their seats claimable with no background job, 20
+boundary rounds of confirm-vs-reclaim never double-win), **NoDoubleSellStressIT** (virtual-thread
+storm; client-side booking ledger and DB invariants must agree: 200 workers / 6,000 attempts /
+0 double-sells), **RestartDurabilityIT** (the context genuinely torn down and rebooted against the
+same database), and **WaitlistIT** (FIFO under a concurrent join storm; waiter priority over
+lapsed-hold reclaims). `PartialConfirmGuardIT` pins the nastiest anomaly; ArchUnit enforces the
+layer rules instead of trusting intentions. Exactly **one unit test** exists — the deadlock-retry
+branch, undrivable deterministically through the API — deliberately: everywhere else the defects
+that matter (races, predicates, rowcounts, locks) live below the mock line, so tests run against
+real Postgres or not at all. A short storm runs in CI; `./gradlew stressTest` runs the full one.
 
 ## The waitlist (stretch 2)
 
-Per-seat FIFO queues, joinable while a seat is HELD. "Defensible order" is a server-assigned
-`GENERATED ALWAYS AS IDENTITY` position — monotonic, client-tamper-proof, and grants always take
-the minimum committed position (join is observable only at commit, so the order is linearizable).
-A freed seat is granted to the head waiter as a **normal 1-seat hold** — confirm, release, expiry
-and the double-sell guarantees all apply unchanged — and direct claims (including lazy reclaims)
-are blocked while anyone waits. The genuinely hard part was a race the adversarial design review
-caught before implementation: a join racing a release could commit a WAITING entry against a seat
-that just went AVAILABLE, freezing it forever under the waiter-priority predicate. The fix makes
-the **seat row the serialization point**: joins take `FOR SHARE` and trust only the post-lock
-status; the freeing routine locks each seat `FOR UPDATE` (in id order, matching the claim's lock
-order) *before* reading its queue. One honest trade-off, stated rather than hidden: grant
-*liveness* for lapsed holds rides the 1s sweeper — correctness (no double-sell, no partial
-confirm) remains sweeper-independent, proven by `WaitlistIT` with the scheduler disabled.
+Per-seat FIFO queues, joinable while a seat is HELD. "Defensible order" = a server-assigned
+identity-column position; grants take the minimum committed position (joins are observable only at
+commit, so the order is linearizable). A freed seat becomes a **normal 1-seat hold** for the head
+waiter — confirm/release/expiry and the double-sell guarantees apply unchanged — and direct claims
+(including lazy reclaims) are blocked while anyone waits. The hard part was a race caught in
+adversarial design review before implementation: a join racing a release could commit a WAITING
+entry against a just-freed seat, freezing it forever under the waiter-priority predicate. The fix
+makes the **seat row the serialization point**: joins take `FOR SHARE` and trust only the
+post-lock status; the freeing routine locks each seat `FOR UPDATE` (in id order, matching the
+claim's lock order) *before* reading its queue. One stated trade-off: grant *liveness* for lapsed
+holds rides the 1s sweeper; correctness remains sweeper-independent, proven by `WaitlistIT` with
+the scheduler disabled.
 
 ## Consciously cut (and why)
 
 - **Auth**: the hold UUID is a capability token; real identity is orthogonal to the concurrency
   problem being assessed.
-- **Hold TTL renewal**: it's where the deliberate `hold.expires_at` / `seat.hold_expires_at`
-  duplication would bite (they'd have to move together); excluded rather than half-done.
-- **Cross-instance SSE fan-out** (`LISTEN/NOTIFY`): clients of instance A don't see instance B's
-  commits live; the snapshot-on-reconnect heals it. Correctness is unaffected.
+- **Hold TTL renewal**: the one place the deliberate `expires_at` duplication would bite;
+  excluded rather than half-done.
+- **Cross-instance SSE fan-out** (`LISTEN/NOTIFY`): instance A's clients miss B's commits live;
+  snapshot-on-reconnect heals it; correctness unaffected.
 - **Payments/pricing, seat categories**: out of scope for the assessed problem.
 
 ## Cloud deployment (bonus)
