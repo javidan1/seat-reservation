@@ -55,6 +55,19 @@ request — nothing here is reconstructed after the fact.
    started. *Lesson: the more a change touches load-bearing semantics, the more the review pass
    pays — this one turned a would-be production incident into a paragraph in DECISIONS.md.*
 
+## Direction, not delegation
+
+The agent's recommendations were inputs, not decisions — and the repo is better where I refused
+them. Three examples: the agent recommended *against* attempting the waitlist stretch on deadline
+risk; I overrode it but set the risk boundary myself (feature branch, full-suite-plus-storm merge
+gate, explicit revert plan) — it landed green. When I probed the test pyramid ("where are the unit
+tests?"), the agent's defense of the all-integration suite was sound but incomplete — the probe
+surfaced the one genuinely untested branch, which became the one justified unit test. And when the
+agent self-graded quality enforcement as merely "good," I rejected the grade — the semantic
+ArchUnit rules (clock ban, transaction-visibility ban) exist because of that pushback. The pattern
+I'd bring to a team: let the agent run inside enforced guardrails, audit its claims against the
+source requirements, and treat its self-assessments as a starting bid, never a verdict.
+
 ## Trust heuristics I applied
 
 - **Trust by default:** mechanical/boilerplate code, tests written against invariants I stated,
