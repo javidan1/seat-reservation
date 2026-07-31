@@ -6,6 +6,7 @@ import com.jmammadov.seatres.domain.ConfirmResult;
 import com.jmammadov.seatres.domain.EventNotFoundException;
 import com.jmammadov.seatres.domain.HoldInvalidatedException;
 import com.jmammadov.seatres.domain.HoldView;
+import com.jmammadov.seatres.domain.SeatChange;
 import com.jmammadov.seatres.domain.SeatsUnavailableException;
 import java.util.List;
 import java.util.Optional;
@@ -35,16 +36,19 @@ public class ReservationService {
   private final TransactionTemplate tx;
   private final ApplicationEventPublisher events;
   private final SeatresProperties properties;
+  private final SeatReleaseService seatRelease;
 
   public ReservationService(
       ReservationRepository repo,
       TransactionTemplate tx,
       ApplicationEventPublisher events,
-      SeatresProperties properties) {
+      SeatresProperties properties,
+      SeatReleaseService seatRelease) {
     this.repo = repo;
     this.tx = tx;
     this.events = events;
     this.properties = properties;
+    this.seatRelease = seatRelease;
   }
 
   public HoldView hold(UUID eventId, String userRef, List<UUID> seatIds) {
@@ -96,6 +100,8 @@ public class ReservationService {
             if (repo.insertBookingSeats(bookingId, holdId) != cas.get().seatCount()) {
               throw new HoldInvalidatedException(holdId);
             }
+            // Sold seats keep no queue: anyone still waiting learns it's over.
+            repo.cancelWaitingOnSeats(sold.stream().map(SeatChange::seatId).toList());
             events.publishEvent(new SeatChangedEvent(sold));
             return new ConfirmResult.Confirmed(repo.findBooking(bookingId).orElseThrow());
           }
@@ -114,7 +120,7 @@ public class ReservationService {
     tx.executeWithoutResult(
         status -> {
           if (repo.casReleaseHold(holdId) == 1) {
-            events.publishEvent(new SeatChangedEvent(repo.releaseSeats(holdId)));
+            events.publishEvent(new SeatChangedEvent(seatRelease.routeFreedSeats(holdId)));
           }
         });
   }
