@@ -1,5 +1,5 @@
 # Build stage: uses the repo's own Gradle wrapper so local and container builds are identical.
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:24-jdk AS build
 WORKDIR /app
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle ./gradle
@@ -8,7 +8,7 @@ COPY src ./src
 RUN ./gradlew --no-daemon bootJar
 
 # Runtime stage: JRE only, non-root.
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:24-jre
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin appuser
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
